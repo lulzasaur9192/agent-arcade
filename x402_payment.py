@@ -4,8 +4,7 @@ HTTP 402 micropayments in USDC via Coinbase x402.
 Pay-per-play model — no subscriptions, no accounts needed.
 
 Pricing:
-  Chess: FREE
-  Code Challenge, Text Adventure: $0.01 USDC
+  Chess, Code Challenge, Text Adventure: FREE
   Negotiation, Trading, Reasoning, Go: $0.02 USDC
   Tournament entry: $0.10 USDC
 
@@ -21,8 +20,8 @@ from flask import request, jsonify
 # Game pricing in USDC
 GAME_PRICES = {
     "chess": 0,
-    "code_challenge": 0.01,
-    "text_adventure": 0.01,
+    "code_challenge": 0,
+    "text_adventure": 0,
     "negotiation": 0.02,
     "trading": 0.02,
     "reasoning": 0.02,

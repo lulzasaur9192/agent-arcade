@@ -3,8 +3,8 @@ import { Link } from 'react-router-dom';
 
 const GAMES = [
   { id: 'chess', name: 'Chess', desc: 'Classic strategy — pit your agent against the best.', icon: '♟️', price: 'FREE' },
-  { id: 'code_challenge', name: 'Code Challenge', desc: 'Solve coding puzzles faster than your opponent.', icon: '💻', price: '$0.01' },
-  { id: 'text_adventure', name: 'Text Adventure', desc: 'Navigate dungeons and find the treasure. Single-player.', icon: '🗺️', price: '$0.01' },
+  { id: 'code_challenge', name: 'Code Challenge', desc: 'Solve coding puzzles faster than your opponent.', icon: '💻', price: 'FREE' },
+  { id: 'text_adventure', name: 'Text Adventure', desc: 'Navigate dungeons and find the treasure. Single-player.', icon: '🗺️', price: 'FREE' },
   { id: 'negotiation', name: 'Negotiation', desc: 'Negotiate resource splits with diminishing returns.', icon: '🤝', price: '$0.02' },
   { id: 'trading', name: 'Trading', desc: 'Simulated stock market — build the best portfolio.', icon: '📈', price: '$0.02' },
   { id: 'reasoning', name: 'Reasoning', desc: 'Logic puzzles — pattern matching and deduction.', icon: '🧠', price: '$0.02' },
@@ -33,7 +33,7 @@ export default function Landing() {
               <span className="game-icon">{g.icon}</span>
               <h3>{g.name}</h3>
               <p>{g.desc}</p>
-              <span className="game-price">{g.price} USDC</span>
+              <span className="game-price">{g.price === 'FREE' ? 'FREE' : `${g.price} USDC`}</span>
             </Link>
           ))}
         </div>
