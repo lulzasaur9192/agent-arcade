@@ -9,6 +9,7 @@ Usage:
     python3 test_full.py --local   # test against localhost:5000
 """
 
+import base64
 import json
 import sys
 import time
@@ -27,6 +28,15 @@ TIMEOUT = 15
 HEALTH_TIMEOUT = 30
 
 # Known answers for reasoning puzzles (prompt substring -> answer)
+FREE_GAMES = {"chess", "code_challenge", "text_adventure"}
+PAID_GAMES = {"negotiation", "trading", "reasoning", "go"}
+
+# Mock x402 payment header for testing paid games
+MOCK_PAYMENT = base64.b64encode(json.dumps({
+    "network": "eip155:8453",
+    "payload": "mock_payment_for_testing",
+}).encode()).decode()
+
 PUZZLE_ANSWERS = {
     "2, 4, 8, 16": "32",
     "1, 1, 2, 3, 5, 8": "13",
@@ -83,11 +93,15 @@ def register_agent(name):
 
 
 def create_game(game_type, p1, p2=None, headers=None):
-    """Create a game, return the JSON response."""
+    """Create a game, return the JSON response.
+    Automatically attaches mock payment header for paid games."""
     data = {"type": game_type, "player1_id": p1}
     if p2 is not None:
         data["player2_id"] = p2
-    r = post("/api/games/create", data, headers=headers or {})
+    h = dict(headers or {})
+    if game_type in PAID_GAMES and "X-PAYMENT" not in h:
+        h["X-PAYMENT"] = MOCK_PAYMENT
+    r = post("/api/games/create", data, headers=h)
     return r
 
 
@@ -399,7 +413,9 @@ def test_payment_free_game():
 
 def test_payment_paid_game_no_header():
     """Paid game (go) without X-PAYMENT header -> 402 when x402 enabled, 201 when disabled."""
-    r = create_game("go", agent1_id, agent2_id)
+    # Explicitly pass empty headers to skip auto-payment
+    data = {"type": "go", "player1_id": agent1_id, "player2_id": agent2_id}
+    r = post("/api/games/create", data, headers={})
     if r.status_code == 402:
         # x402 is enabled - verify the 402 response format
         data = r.json()
@@ -417,14 +433,8 @@ def test_payment_paid_game_no_header():
 
 def test_payment_paid_game_with_header():
     """Paid game (go) with mock X-PAYMENT header -> 201 (accepted by MVP verifier)."""
-    # Base64 of a mock payment payload
-    import base64
-    mock_payment = base64.b64encode(json.dumps({
-        "network": "eip155:8453",
-        "payload": "mock_payment_for_testing",
-    }).encode()).decode()
-
-    r = create_game("go", agent1_id, agent2_id, headers={"X-PAYMENT": mock_payment})
+    data = {"type": "go", "player1_id": agent1_id, "player2_id": agent2_id}
+    r = post("/api/games/create", data, headers={"X-PAYMENT": MOCK_PAYMENT})
     if r.status_code == 201:
         print(f"         (payment accepted or x402 disabled)")
     elif r.status_code == 402:
