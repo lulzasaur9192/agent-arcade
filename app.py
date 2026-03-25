@@ -51,6 +51,7 @@ from reasoning import ReasoningGame
 from text_adventure import TextAdventure
 from websocket_server import spectator_manager
 from x402_payment import get_pricing_info, init_x402
+import house_bot
 
 app = Flask(__name__, static_folder="static", static_url_path="")
 CORS(app)
@@ -72,6 +73,10 @@ matchmaking_queues: dict[str, list[tuple[int, datetime]]] = {}
 
 # Optional Flask-SocketIO instance — set up only when running the real server
 socketio = None
+
+# Initialize house bot agent + start worker (works for both gunicorn and __main__)
+house_bot.get_or_create_bot(SessionFactory, Agent)
+house_bot.start_worker(app)
 
 
 def get_session():
@@ -592,6 +597,10 @@ def _finalize_game(game_id: int, engine):
     active_games.pop(game_id, None)
 
 
+# Give the house bot worker access to engine internals
+house_bot.set_app_refs(active_games, token_lookup, _dispatch_move, _save_game_state, _finalize_game)
+
+
 # ---------------------------------------------------------------------------
 # Matchmaking
 # ---------------------------------------------------------------------------
@@ -682,7 +691,50 @@ def matchmaking_join():
             "opponent_play_url": f"/api/play/{p1_token}",
         }), 201
 
-    # No opponent yet — queue up
+    # No opponent waiting — match against house bot instantly
+    bot_id = house_bot.get_or_create_bot(SessionFactory, Agent)
+    if bot_id and int(agent_id) != bot_id:
+        p1_int, p2_int = int(agent_id), bot_id
+        p1_token = secrets.token_urlsafe(32)
+        p2_token = secrets.token_urlsafe(32)
+
+        engine = _create_engine(game_type_str, 0, p1_int, p2_int)
+
+        session = get_session()
+        try:
+            game = Game(
+                game_type=gt,
+                player1_id=p1_int,
+                player2_id=p2_int,
+                player1_token=p1_token,
+                player2_token=p2_token,
+            )
+            session.add(game)
+            session.commit()
+            game_id = game.id
+
+            engine.game_id = str(game_id)
+            game.current_state = json.dumps(engine.to_dict())
+            session.commit()
+        finally:
+            session.close()
+
+        active_games[game_id] = engine
+        token_lookup[p1_token] = (game_id, p1_int)
+        token_lookup[p2_token] = (game_id, p2_int)
+
+        # Register the bot's token so the worker plays moves
+        house_bot.register_bot_game(game_id, p2_token)
+
+        return jsonify({
+            "status": "matched",
+            "game_id": game_id,
+            "opponent_id": bot_id,
+            "opponent_name": house_bot.HOUSE_BOT_NAME,
+            "play_url": f"/api/play/{p1_token}",
+        }), 201
+
+    # Fallback — queue up (shouldn't normally hit this)
     queue.append((int(agent_id), datetime.now(timezone.utc)))
     return jsonify({"status": "queued", "message": "Waiting for an opponent..."}), 202
 
