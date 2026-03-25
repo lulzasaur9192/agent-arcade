@@ -28,7 +28,7 @@ Season management:
 import json
 import os
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from flask import Flask, jsonify, request, send_from_directory
 
@@ -46,9 +46,9 @@ from leaderboard import (
 from models import Agent, Game, GameType, Season, SeasonalRank, init_db
 from negotiation import NegotiationGame
 from payment import check_game_access
+from poker import PokerGame
 from reasoning import ReasoningGame
 from text_adventure import TextAdventure
-from trading import TradingGame
 from websocket_server import spectator_manager
 from x402_payment import get_pricing_info, init_x402
 
@@ -163,23 +163,6 @@ def _restore_engine(game: Game):
         engine.move_history = state.get("move_history", [])
         return engine
 
-    if gt == GameType.TRADING:
-        engine = TradingGame(str(game.id), p1, p2)
-        engine.current_player = state.get("current_player", engine.current_player)
-        engine.round = state.get("round", 1)
-        engine.turn_in_round = state.get("turn_in_round", 0)
-        engine.prices = state.get("prices", engine.prices)
-        portfolios = state.get("portfolios", {})
-        for pid in [p1, p2]:
-            if pid in portfolios:
-                engine.portfolios[pid] = portfolios[pid]
-        engine.game_over = state.get("game_over", False)
-        engine.winner = state.get("winner")
-        engine.reason = state.get("reason")
-        engine.move_history = state.get("move_history", [])
-        engine.price_history = state.get("price_history", engine.price_history)
-        return engine
-
     if gt == GameType.REASONING:
         engine = ReasoningGame(str(game.id), p1, p2)
         engine.current_player = state.get("current_player", engine.current_player)
@@ -203,6 +186,33 @@ def _restore_engine(game: Game):
         engine.game_over = state.get("game_over", False)
         engine.winner = state.get("winner")
         engine.reason = state.get("reason")
+        return engine
+
+    if gt == GameType.POKER:
+        engine = PokerGame(str(game.id), p1, p2)
+        engine.current_player = state.get("current_player", engine.current_player)
+        engine.chips = state.get("chips", engine.chips)
+        engine.hand_number = state.get("hand_number", engine.hand_number)
+        engine.dealer = state.get("dealer", engine.dealer)
+        engine.game_over = state.get("game_over", False)
+        engine.winner = state.get("winner")
+        engine.reason = state.get("reason")
+        engine.match_history = state.get("match_history", [])
+        engine.phase = state.get("phase", "waiting")
+        engine.hole_cards = state.get("hole_cards", engine.hole_cards)
+        engine.community_cards = state.get("community_cards", [])
+        engine.pot = state.get("pot", 0)
+        engine.bets = state.get("bets", engine.bets)
+        engine.acted_this_round = state.get("acted_this_round", engine.acted_this_round)
+        engine.folded = state.get("folded")
+        engine.all_in = set(state.get("all_in", []))
+        engine.hand_history = state.get("hand_history", [])
+        engine.deck_seed = state.get("deck_seed", 0)
+        engine.deck_index = state.get("deck_index", 0)
+        # Restore deck from seed and advance to saved index
+        from poker import Deck
+        engine.deck = Deck(engine.deck_seed)
+        engine.deck.index = engine.deck_index
         return engine
 
     return None
@@ -282,9 +292,9 @@ def _create_engine(game_type: str, game_id: int, p1: int, p2: int):
         "code_challenge": lambda: CodeChallenge(str(game_id), p1s, p2s),
         "text_adventure": lambda: TextAdventure(str(game_id), p1s),
         "negotiation": lambda: NegotiationGame(str(game_id), p1s, p2s),
-        "trading": lambda: TradingGame(str(game_id), p1s, p2s),
         "reasoning": lambda: ReasoningGame(str(game_id), p1s, p2s),
         "go": lambda: GoGame(str(game_id), p1s, p2s),
+        "poker": lambda: PokerGame(str(game_id), p1s, p2s),
     }
     factory = engines.get(game_type)
     return factory() if factory else None
@@ -383,9 +393,59 @@ def create_game():
         session.close()
 
 
+# ---------------------------------------------------------------------------
+# Stale game cleanup
+# ---------------------------------------------------------------------------
+
+STALE_GAME_TIMEOUT = timedelta(hours=1)
+_last_cleanup = datetime.now(timezone.utc)
+
+
+def _cleanup_stale_games() -> int:
+    """Mark games with no activity for STALE_GAME_TIMEOUT as abandoned."""
+    global _last_cleanup
+    now = datetime.now(timezone.utc)
+
+    # Run at most once per 5 minutes
+    if now - _last_cleanup < timedelta(minutes=5):
+        return 0
+    _last_cleanup = now
+
+    stale_ids = []
+    session = get_session()
+    try:
+        for game_id in list(active_games.keys()):
+            game = session.get(Game, game_id)
+            if not game:
+                stale_ids.append(game_id)
+                continue
+            # Use the later of created_at or the last state-save timestamp
+            age = now - (game.created_at.replace(tzinfo=timezone.utc)
+                         if game.created_at.tzinfo is None else game.created_at)
+            if age > STALE_GAME_TIMEOUT:
+                game.finished_at = now
+                game.current_state = json.dumps(
+                    active_games[game_id].to_dict()
+                ) if active_games.get(game_id) else game.current_state
+                stale_ids.append(game_id)
+        session.commit()
+    finally:
+        session.close()
+
+    for gid in stale_ids:
+        active_games.pop(gid, None)
+        # Clean up token_lookup entries pointing to this game
+        for tok, (g, _) in list(token_lookup.items()):
+            if g == gid:
+                token_lookup.pop(tok, None)
+
+    return len(stale_ids)
+
+
 @app.route("/api/games", methods=["GET"])
 def list_games():
-    """List active games."""
+    """List active games (auto-cleans stale games)."""
+    _cleanup_stale_games()
     return jsonify({
         "games": [
             {"id": gid, "type": type(eng).__name__, "game_over": getattr(eng, "game_over", False)}
@@ -434,10 +494,6 @@ def _dispatch_move(engine, data: dict, player_id: str) -> dict:
             return {"valid": False, "error": "action required (propose/accept/reject)"}
         return engine.make_move(player_id, action, data)
 
-    if isinstance(engine, TradingGame):
-        actions = data.get("actions") or data.get("trades", [{"action": "hold"}])
-        return engine.make_move(player_id, actions)
-
     if isinstance(engine, ReasoningGame):
         answer = data.get("answer", "")
         if not answer:
@@ -449,6 +505,12 @@ def _dispatch_move(engine, data: dict, player_id: str) -> dict:
         if not move:
             return {"valid": False, "error": "move is required (e.g. D4 or 'pass')"}
         return engine.make_move(move, player_id)
+
+    if isinstance(engine, PokerGame):
+        action = data.get("action", "")
+        if not action:
+            return {"valid": False, "error": "action required (fold/check/call/raise/all_in)"}
+        return engine.make_move(player_id, action, data)
 
     return {"valid": False, "error": "Unknown game engine"}
 
@@ -677,7 +739,12 @@ def play_get_state(token: str):
         return jsonify({"error": "Invalid or expired play token"}), 404
 
     game_id, player_id, engine = result
-    state = engine.to_dict()
+
+    # Poker: use player-specific view that masks opponent's hole cards
+    if isinstance(engine, PokerGame):
+        state = engine.to_player_dict(str(player_id))
+    else:
+        state = engine.to_dict()
 
     # Add turn/player context
     state["game_id"] = game_id

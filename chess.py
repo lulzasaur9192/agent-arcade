@@ -475,6 +475,7 @@ class ChessGame:
     def to_dict(self) -> dict:
         return {
             'game_id': self.game_id,
+            'type': 'chess',
             'board': self.board,
             'current_player': self.current_player,
             'move_count': self.move_count,

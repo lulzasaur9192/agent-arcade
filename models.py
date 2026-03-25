@@ -50,6 +50,7 @@ class GameType(str, enum.Enum):
     TRADING = "trading"
     REASONING = "reasoning"
     GO = "go"
+    POKER = "poker"
 
 
 class Game(Base):

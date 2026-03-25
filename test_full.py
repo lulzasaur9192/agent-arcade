@@ -28,8 +28,8 @@ TIMEOUT = 15
 HEALTH_TIMEOUT = 30
 
 # Known answers for reasoning puzzles (prompt substring -> answer)
-FREE_GAMES = {"chess", "code_challenge", "text_adventure"}
-PAID_GAMES = {"negotiation", "trading", "reasoning", "go"}
+FREE_GAMES = {"chess", "code_challenge", "text_adventure", "poker"}
+PAID_GAMES = {"negotiation", "reasoning", "go"}
 
 # Mock x402 payment header for testing paid games
 MOCK_PAYMENT = base64.b64encode(json.dumps({
@@ -149,8 +149,8 @@ def test_pricing():
     games = data["games"]
     free_games = [g for g, info in games.items() if info["free"]]
     paid_games = [g for g, info in games.items() if not info["free"]]
-    assert set(free_games) == {"chess", "code_challenge", "text_adventure"}, f"Free games: {free_games}"
-    assert set(paid_games) == {"negotiation", "trading", "reasoning", "go"}, f"Paid games: {paid_games}"
+    assert set(free_games) == {"chess", "code_challenge", "text_adventure", "poker"}, f"Free games: {free_games}"
+    assert set(paid_games) == {"negotiation", "reasoning", "go"}, f"Paid games: {paid_games}"
 
 
 def test_register():
@@ -276,32 +276,6 @@ def test_negotiation():
     assert rj.get("game_over"), "Negotiation did not end after accept"
 
 
-def test_trading():
-    """Both agents hold for all rounds until game completes."""
-    r = create_game("trading", agent1_id, agent2_id)
-    assert r.status_code == 201, f"Create failed: {r.status_code} {r.text}"
-    data = r.json()
-    p1_token = data["play_urls"]["player1"].split("/")[-1]
-    p2_token = data["play_urls"]["player2"].split("/")[-1]
-
-    game_over = False
-    for round_num in range(25):  # 20 rounds + buffer
-        # P1 holds
-        r1 = play(p1_token, {"actions": [{"action": "hold"}]})
-        assert r1.status_code == 200, f"P1 hold failed round {round_num}: {r1.text}"
-        if r1.json().get("game_over"):
-            game_over = True
-            break
-        # P2 holds
-        r2 = play(p2_token, {"actions": [{"action": "hold"}]})
-        assert r2.status_code == 200, f"P2 hold failed round {round_num}: {r2.text}"
-        if r2.json().get("game_over"):
-            game_over = True
-            break
-
-    assert game_over, "Trading game did not complete after 20 rounds"
-
-
 def test_reasoning():
     """Both agents answer 5 puzzles using known answers from PUZZLE_BANK."""
     r = create_game("reasoning", agent1_id, agent2_id)
@@ -371,6 +345,78 @@ def test_go():
     assert r2.json().get("game_over", False), "Go game did not end after two passes"
 
 
+def test_poker():
+    """Create poker game, play through pre-flop actions, verify state transitions."""
+    r = create_game("poker", agent1_id, agent2_id)
+    assert r.status_code == 201, f"Create failed: {r.status_code} {r.text}"
+    data = r.json()
+    p1_token = data["play_urls"]["player1"].split("/")[-1]
+    p2_token = data["play_urls"]["player2"].split("/")[-1]
+
+    # Get initial state — verify hole cards are hidden from opponent
+    state1 = play_get(p1_token).json()
+    assert state1.get("phase") == "pre_flop", f"Expected pre_flop, got {state1.get('phase')}"
+    assert state1.get("hand_number") == 1
+    assert len(state1["hole_cards"][str(agent1_id)]) == 2, "P1 should see own hole cards"
+    assert state1["hole_cards"][str(agent2_id)] == ["??", "??"], "P1 should NOT see P2's hole cards"
+
+    # Figure out who acts first (SB/dealer acts first pre-flop in HU)
+    if state1.get("your_turn"):
+        first_token, second_token = p1_token, p2_token
+    else:
+        first_token, second_token = p2_token, p1_token
+
+    # SB calls (limps)
+    r1 = play(first_token, {"action": "call"})
+    assert r1.status_code == 200
+    rj1 = r1.json()
+    assert rj1.get("valid"), f"Call invalid: {rj1}"
+
+    # BB checks (big blind option)
+    r2 = play(second_token, {"action": "check"})
+    assert r2.status_code == 200
+    rj2 = r2.json()
+    assert rj2.get("valid"), f"Check invalid: {rj2}"
+
+    # Should now be on flop
+    assert rj2.get("phase") == "flop", f"Expected flop, got {rj2.get('phase')}"
+    assert len(rj2.get("community_cards", [])) == 3, "Flop should have 3 community cards"
+
+    # Play through flop: both check
+    state = play_get(first_token).json()
+    if state.get("your_turn"):
+        ft, st = first_token, second_token
+    else:
+        ft, st = second_token, first_token
+
+    # Non-dealer acts first post-flop, but let's just use whose turn it is
+    r3 = play(ft, {"action": "check"})
+    assert r3.status_code == 200 and r3.json().get("valid"), f"Flop check 1 failed: {r3.json()}"
+
+    r4 = play(st, {"action": "check"})
+    assert r4.status_code == 200 and r4.json().get("valid"), f"Flop check 2 failed: {r4.json()}"
+
+    # Should be on turn now
+    assert r4.json().get("phase") == "turn", f"Expected turn, got {r4.json().get('phase')}"
+
+    # Fold on the turn to end hand quickly
+    state = play_get(first_token).json()
+    if state.get("your_turn"):
+        fold_token = first_token
+    else:
+        fold_token = second_token
+
+    r5 = play(fold_token, {"action": "fold"})
+    assert r5.status_code == 200
+    rj5 = r5.json()
+    assert rj5.get("valid"), f"Fold invalid: {rj5}"
+
+    # Game should NOT be over (only 1 hand played, match is 10 hands)
+    # A new hand should have started
+    assert rj5.get("hand_number") == 2 or not rj5.get("game_over"), \
+        f"Expected hand 2 to start, got hand_number={rj5.get('hand_number')}, game_over={rj5.get('game_over')}"
+
+
 def test_matchmaking():
     """Two agents join chess queue -> matched."""
     # Agent 1 joins queue
@@ -394,7 +440,7 @@ def test_leaderboard():
 
 def test_leaderboard_types():
     """GET /api/leaderboard/{type} for all 7 game types -> 200."""
-    game_types = ["chess", "code_challenge", "text_adventure", "negotiation", "trading", "reasoning", "go"]
+    game_types = ["chess", "code_challenge", "text_adventure", "negotiation", "reasoning", "go", "poker"]
     for gt in game_types:
         r = get(f"/api/leaderboard/{gt}")
         assert r.status_code == 200, f"Leaderboard {gt} failed: {r.status_code} {r.text}"
@@ -477,10 +523,10 @@ def main():
     test("chess (Scholar's Mate)", test_chess)
     test("code_challenge", test_code_challenge)
     test("text_adventure", test_text_adventure)
+    test("poker (Texas Hold'em)", test_poker)
 
     print("\n[Games - Paid Tier]")
     test("negotiation", test_negotiation)
-    test("trading (20 rounds)", test_trading)
     test("reasoning (puzzle bank)", test_reasoning)
     test("go (pass-pass ending)", test_go)
 

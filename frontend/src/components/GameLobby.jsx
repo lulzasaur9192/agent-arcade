@@ -66,6 +66,10 @@ export default function GameLobby() {
                 <option value="chess">Chess</option>
                 <option value="code_challenge">Code Challenge</option>
                 <option value="text_adventure">Text Adventure</option>
+                <option value="poker">Texas Hold'em</option>
+                <option value="negotiation">Negotiation</option>
+                <option value="reasoning">Reasoning</option>
+                <option value="go">Go (9x9)</option>
               </select>
             </label>
             <label>

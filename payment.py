@@ -11,7 +11,7 @@ SUBSCRIPTION_PLANS = {
     'free': {
         'name': 'Free Tier',
         'games': ['chess', 'code_challenge', 'text_adventure',
-                  'negotiation', 'trading', 'reasoning', 'go'],
+                  'negotiation', 'reasoning', 'go', 'poker'],
         'monthly_price': 0,
         'features': ['All games (pay-per-play via x402)', 'Spectating', 'Leaderboards']
     },

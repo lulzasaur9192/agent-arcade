@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { getGame } from '../api';
-import ChessBoard from './ChessBoard';
+import GameRenderer from './renderers/GameRenderer';
+import GameSidebar from './renderers/GameSidebar';
 
 export default function GameViewer() {
   const { id } = useParams();
@@ -44,55 +45,30 @@ export default function GameViewer() {
 
       <div className="spectator-layout">
         <div className="card board-card">
-          {game.board && Array.isArray(game.board) && game.board.length === 8 ? (
-            <ChessBoard board={game.board} />
-          ) : (
-            <pre className="board-display">{JSON.stringify(game, null, 2)}</pre>
+          <GameRenderer state={game} />
+          {isOver && (
+            <div className="game-result-banner">
+              {game.winner ? `Winner: Player ${game.winner}` : 'Game Over'}
+              {game.reason && ` \u2014 ${game.reason}`}
+            </div>
           )}
         </div>
 
         <div className="card sidebar-card">
-          <h3>Details</h3>
-          <dl className="detail-list">
-            <dt>Status</dt>
-            <dd>
-              <span className={`badge ${isOver ? 'badge-finished' : 'badge-active'}`}>
-                {isOver ? 'finished' : 'active'}
-              </span>
-            </dd>
-            <dt>Current Turn</dt><dd>Player {game.current_player || '—'}</dd>
-            <dt>Moves</dt><dd>{game.move_count ?? game.move_history?.length ?? '—'}</dd>
-          </dl>
-
-          {isOver && game.winner && (
-            <div className="game-result-banner" style={{ marginTop: 16 }}>
-              Winner: Player {game.winner}
-              {game.reason && ` — ${game.reason}`}
-            </div>
-          )}
-
-          {game.move_history && game.move_history.length > 0 && (
-            <div style={{ marginTop: 16 }}>
-              <h3>Last Moves</h3>
-              <div className="move-pairs">
-                {game.move_history.slice(-10).reduce((pairs, m, i, arr) => {
-                  const offset = Math.floor((game.move_history.length - arr.length) / 2);
-                  if (i % 2 === 0) pairs.push([m]);
-                  else pairs[pairs.length - 1].push(m);
-                  return pairs;
-                }, []).map((pair, i) => {
-                  const moveNum = Math.floor((game.move_history.length - 10) / 2) + i + 1;
-                  return (
-                    <div key={i} className="move-pair">
-                      <span className="move-num">{Math.max(1, moveNum)}.</span>
-                      <span className="move-white">{pair[0]}</span>
-                      <span className="move-black">{pair[1] || ''}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
+          <div className="sidebar-section">
+            <h3>Details</h3>
+            <dl className="detail-list">
+              <dt>Status</dt>
+              <dd>
+                <span className={`badge ${isOver ? 'badge-finished' : 'badge-active'}`}>
+                  {isOver ? 'finished' : 'active'}
+                </span>
+              </dd>
+              <dt>Type</dt><dd>{game.type || 'chess'}</dd>
+              <dt>Moves</dt><dd>{game.move_count ?? game.move_history?.length ?? '\u2014'}</dd>
+            </dl>
+          </div>
+          <GameSidebar state={game} />
         </div>
       </div>
     </div>

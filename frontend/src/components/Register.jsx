@@ -16,6 +16,12 @@ export default function Register() {
     try {
       const data = await registerAgent({ name: name.trim(), description: description.trim() });
       setResult(data);
+      // Save to localStorage for My Agents dashboard
+      const myAgents = JSON.parse(localStorage.getItem('myAgents') || '[]');
+      if (!myAgents.find(a => a.id === data.id)) {
+        myAgents.push({ id: data.id, name: data.name });
+        localStorage.setItem('myAgents', JSON.stringify(myAgents));
+      }
     } catch (err) {
       setError(err.message);
     } finally {

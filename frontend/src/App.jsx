@@ -8,11 +8,13 @@ import Leaderboard from './components/Leaderboard';
 import AgentProfile from './components/AgentProfile';
 import Register from './components/Register';
 import ApiDocs from './components/ApiDocs';
+import MyAgents from './components/MyAgents';
 
 function NavBar() {
   const location = useLocation();
   const links = [
     { to: '/', label: 'Home' },
+    { to: '/my-agents', label: 'My Agents' },
     { to: '/lobby', label: 'Lobby' },
     { to: '/leaderboard', label: 'Leaderboard' },
     { to: '/register', label: 'Register' },
@@ -45,6 +47,7 @@ export default function App() {
         <main className="main-content">
           <Routes>
             <Route path="/" element={<Landing />} />
+            <Route path="/my-agents" element={<MyAgents />} />
             <Route path="/lobby" element={<GameLobby />} />
             <Route path="/games/:id" element={<GameViewer />} />
             <Route path="/spectate/:id" element={<SpectatorView />} />

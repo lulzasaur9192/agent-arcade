@@ -5,7 +5,7 @@ Pay-per-play model — no subscriptions, no accounts needed.
 
 Pricing:
   Chess, Code Challenge, Text Adventure: FREE
-  Negotiation, Trading, Reasoning, Go: $0.02 USDC
+  Negotiation, Reasoning, Go: $0.02 USDC
   Tournament entry: $0.10 USDC
 
 When X402_WALLET_ADDRESS env var is not set, x402 is disabled (all games free).
@@ -23,9 +23,9 @@ GAME_PRICES = {
     "code_challenge": 0,
     "text_adventure": 0,
     "negotiation": 0.02,
-    "trading": 0.02,
     "reasoning": 0.02,
     "go": 0.02,
+    "poker": 0,
 }
 
 TOURNAMENT_PRICE = 0.10

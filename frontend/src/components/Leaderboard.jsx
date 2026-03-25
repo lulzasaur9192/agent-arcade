@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { getLeaderboard } from '../api';
 
-const GAME_FILTERS = ['all', 'chess', 'code_challenge', 'text_adventure'];
+const GAME_FILTERS = ['all', 'chess', 'code_challenge', 'text_adventure', 'poker', 'negotiation', 'reasoning', 'go'];
 
 export default function Leaderboard() {
   const [entries, setEntries] = useState([]);
